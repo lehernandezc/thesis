@@ -1,0 +1,1095 @@
+---
+title: "Population genomics analysis in Rhodnius ecuadoriensis"
+author: "Enrique Hernandez"
+date: "17 August 2019"
+output: html_document
+---
+
+## Background
+
+The purpose of this tutorial is understanding the population dynamics of domicile/peridomicile and sylvatic populations of main Chagas disease vector, Rhodnius ecuadoriensis, in sourthern Ecuador.
+
+We will carry out conventional population analyses to test different hypothesis of geneflow among these triatomine populations.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# read in R packages
+
+library(vcfR)
+library(adegenet)
+library(hierfstat)
+library(pegas)
+library(ape)
+library(phangorn)
+library(poppr)     # Make sure poppr is loaded if you haven't done so already.
+library(magrittr)
+library(stats)
+library(ade4)
+library(phangorn)
+library(phytools)
+library(mmod)
+library(raster)
+library(MASS)
+library(ecodist)
+library(ggplot2)
+library(reshape)
+library(reshape2)
+library(tidyverse)
+library(Stack)
+library(corMLPE)
+
+```
+
+## Read in genotype informatiom
+
+In this step, we will read in R the genotype information obtained from the STACKS pipeline. We obtained 2552 high quality variants among 272 Rhodnius ecuadoriensis samples distributed in 25 populations among loja.
+
+In addition, we will add extra information in the genind object such as population assigment, coordinates and other categories which will be useful for DAPC, AMOVA or spatial analyses.
+
+
+```{r }
+# set working directory
+setwd("C:/Users/quiqu/Dropbox/Recuadoriensis_Analysis/C02_KNNimp")
+# linux cluster directory, close when not in cluster
+#setwd("~/Dropbox/Recuadoriensis_Analysis/C02_KNNimp")
+# Read  in vcf file
+rhod.vcf <- read.vcfR("./snps.loja.KNNimpR3_pophabtime.vcf")
+
+# Convert vcf to genind object
+rhod.genind <- vcfR2genind(rhod.vcf, sep = "/")
+
+# Add population map from sample information file.
+rhod.info <- read.csv("./C02KNNimpR3_pophabtime_strata.csv")
+popmap <- as.factor(as.vector(rhod.info$pop))
+rhod.genind@pop <- popmap
+rhod.genind
+
+# Add the samples coordinates in UTM from information file.
+xy <- cbind(rhod.info$X_point, rhod.info$Y_point)
+rhod.genind@other$xy <- as.data.frame(xy)
+rhod.genind
+
+# Append information file as strata in the genind object
+
+strata(rhod.genind) <- rhod.info
+rhod.genind
+
+```
+
+##A) Investigate gene flow between domicile and sylvatic habitats.
+
+Calculate alpha diversity stats for different gropu categories: population, habitat and time of collection within communities
+
+1 Domicile and sylvatic samples of groups within the 7 communities with samples from both habitats
+
+```{r }
+# Remove communities without samples collected in both habitats (domicile and sylvatic).
+rhod.domsyl <- popsub(rhod.genind, blacklist=c("SF", "LM", "AH", "ND", "HG", "TC", "VC", "BM", "GA", "EX", "YS", "TR", "SS", "AZ", "NJ", "NT", "RT", "TM"))
+# Change the population map with the approrpiate domicile and sylvatic category.
+popmap.hab <- as.factor(as.vector(rhod.domsyl@strata$pophab))
+rhod.domsyl@pop <- popmap.hab
+
+# Basic information about the data. e.g
+rhod.sum <- summary(rhod.domsyl)
+
+# calculate per locus observed and expected heterozygocity {hierfstat}
+rhod.bs <- basic.stats(rhod.domsyl, diploid = TRUE, digits = 2)
+# Calculate Alleic richness
+rhod.ar<- allelic.richness(rhod.domsyl)
+#$overall
+#   Ho    Hs    Ht   Dst   Htp  Dstp   Fst  Fstp   Fis  Dest 
+#  0.18  0.17  0.22  0.05  0.23  0.05  0.23  0.24 -0.02  0.07
+
+wc(rhod.domsyl)
+#$FST
+#[1] 0.27404
+#$FIS
+#[1] -0.02670102
+
+# Calculate average Observed heterozygosity per population
+mean(rhod.bs$Ho[,1])
+# Expected heterozygosity Hs
+mean(rhod.bs$Hs[,1])
+# Calculating mean Fis per population
+mean(rhod.bs$Fis[,1], na.rm=T)
+#mean allelic richness by population
+mean(rhod.ar$Ar[,1])
+# Calculate loci on HWE
+temp.domsyl <- seppop(rhod.domsyl, pop=rhod.domsyl@pop)
+
+br.dom <- hw.test(temp.domsyl$BRdom, B=0) # 0.9137931
+br.syl <- hw.test(temp.domsyl$BRsyl, B=0) # 0.9098746
+
+ce.dom <- hw.test(temp.domsyl$CEdom, B=0) # 0.9188871
+ce.syl <- hw.test(temp.domsyl$CEsyl, B=0) # 1
+
+cg.dom <- hw.test(temp.domsyl$CGdom, B=0) # 0.9251567
+cg.syl <- hw.test(temp.domsyl$CGsyl, B=0) # 0.9224138
+
+cq.dom <- hw.test(temp.domsyl$CQdom, B=0) # 0.8981191
+cq.syl <- hw.test(temp.domsyl$CQsyl, B=0) # 1
+
+gl.dom <- hw.test(temp.domsyl$GLdom, B=0) # 1
+gl.syl <- hw.test(temp.domsyl$GLsyl, B=0) # 0.9286834
+
+hy.dom <- hw.test(temp.domsyl$HYdom, B=0) # 0.9310345
+hy.syl <- hw.test(temp.domsyl$HYsyl, B=0) # 1
+
+sj.dom <- hw.test(temp.domsyl$SJdom, B=0)  # 0.9392633
+sj.syl <- hw.test(temp.domsyl$SJsyl, B=0)  # 0.9451411
+
+# % of locus in HWE proportions
+
+length(which(br.dom[,3]>0.05))/length(br.dom[,3]) # 0.0.914
+
+
+
+```
+2 Population with dimicile and sylvatic samples as a group independly of the collection habitat
+
+```{r}
+
+# Remove communities with mixed samples
+rhod.mixpop <- popsub(rhod.genind, blacklist=c("SF", "LM", "AH", "ND", "HG", "TC", "VC", "BM", "GA", "EX", "YS", "TR", "SS", "AZ", "NJ", "NT", "RT", "TM"))
+# calculate per locus observed and expected heterozygocity {hierfstat}
+rhod.mix.bs <- basic.stats(rhod.mixpop, diploid = TRUE, digits = 2)
+#calaculate allelic richness
+rhod.mix.ar <- allelic.richness(rhod.mixpop)
+
+# Calculate average Observed heterozygosity per population
+mean(rhod.mix.bs$Ho[,1])
+# Expected heterozygosity Hs
+mean(rhod.mix.bs$Hs[,1])
+# Calculating mean Fis per population
+mean(rhod.mix.bs$Fis[,1], na.rm=T)
+# mean allelic richness by pop
+mean(rhod.mix.ar$Ar[,1])
+
+
+
+
+```
+
+3. Populations with groups of samples collected at different year and whether there was a insecticide spraying intervention at that year.
+
+```{r}
+# 
+# Remove communities without samples collected in both habitats (domicile and sylvatic).
+rhod.time <- popsub(rhod.genind, blacklist=c("SF", "LM", "AH", "HG", "TC", "VC", "BM", "EX", "YS", "SS", "AZ", "NJ", "NT", "RT", "TM"))
+
+# Change the population map with the approrpiate domicile and sylvatic category.
+popmap.time <- as.factor(as.vector(rhod.time@strata$pophabtimetreat))
+rhod.time@pop <- popmap.time
+
+# calculate per locus observed and expected heterozygocity {hierfstat}
+rhod.time.bs <- basic.stats(rhod.time, diploid = TRUE, digits = 2)
+#$overall
+#   Ho    Hs    Ht   Dst   Htp  Dstp   Fst  Fstp   Fis  Dest 
+# 0.18  0.17  0.22  0.06  0.23  0.06  0.25  0.26 -0.05  0.07 
+
+# calculate allelic richness 
+rhod.time.ar <- allelic.richness(rhod.time)
+
+#Global fst
+
+wc(rhod.time)
+#$FST
+#[1] 0.2771999
+#$FIS
+#[1] -0.06638569
+
+# Average Observed heterozygosity per population
+mean(rhod.time.bs$Ho[,1])
+# Expected heterozygosity Hs
+mean(rhod.time.bs$Hs[,1])
+# Calculating mean Fis per population
+mean(rhod.time.bs$Fis[,1], na.rm=T)
+# mean allelic reachniss by pop
+mean(rhod.time.ar$Ar[,1])
+
+```
+4. Calculate alpha diversity for population with only domicile or sylvatic pops
+
+```{r}
+
+# subset samples with only dom or sylvatic pops
+rhod.onepop <- popsub(rhod.genind, blacklist=c("BR", "CE", "CG", "CQ","GL", "HY","SJ"))
+
+# calculate basic stats and allelic richness
+rhod.onepop.bs <- basic.stats(rhod.onepop, diploid = TRUE, digits = 2)
+rhod.onepop.ar <- allelic.richness(rhod.onepop)
+# Obs. heterocigocity
+mean(rhod.onepop.bs$Ho[,1])
+# Exp. Hetero
+mean(rhod.onepop.bs$Hs[,1])
+#mean Fis
+mean(rhod.onepop.bs$Fis[,1], na.rm=T)
+# mean allelic richness
+mean(rhod.onepop.ar$Ar[,1])
+
+# Calculate loci on HWE
+t.one <- seppop(rhod.onepop, pop=rhod.onepop@pop)
+
+length(which(ah[,3]>0.05))/length(ah[,3])
+
+ah <- hw.test(t.one$AH, B=0) # 0.8824451
+az <- hw.test(t.one$AZ, B=0) # 0.919279
+bm <- hw.test(t.one$BM, B=0)# 1
+ex <- hw.test(t.one$EX, B=0) #0.9275078
+ga <- hw.test(t.one$GA, B=0) #0.9294671
+hg <- hw.test(t.one$HG, B=0) # 0.9275078
+lm <- hw.test(t.one$LM, B=0)# 0.8851881
+nd <- hw.test(t.one$ND, B=0) # 0.9075235
+nj <- hw.test(t.one$NJ, B=0) # 0.9169279
+nt <- hw.test(t.one$NT, B=0) # 0.9345611
+rt <- hw.test(t.one$RT, B=0)# 0.950627
+sf <- hw.test(t.one$SF, B=0)# 0.9416144
+ss <- hw.test(t.one$SS, B=0)#  0.8965517
+tc <- hw.test(t.one$TC, B=0)# 0.9055643
+tm <- hw.test(t.one$TM, B=0)# 0.9467085
+tr <- hw.test(t.one$TR, B=0)# 0.9306426
+vc <- hw.test(t.one$VC, B=0)# 0.8726489
+ys <- hw.test(t.one$YS, B=0)#0.9067398
+
+
+
+```
+
+AMOVA
+
+1. populations/habitat 272 samples 25 communties
+2. populations/habitat 89 samples 7 communities
+
+
+```{r}
+
+# wc Fst
+wc(rhod.genind)
+
+#$FST
+#[1] 0.287689
+#$FIS
+#[1] -0.04400202
+
+
+# amova with hierstat
+rhod.hier <- genind2hierfstat(rhod.genind, pop = rhod.genind@pop)
+rhod.varcomp <- varcomp.glob(levels = data.frame(rhod.genind@strata$pop, rhod.genind@strata$hab), rhod.hier[,-1], diploid = TRUE)
+rhod.varcomp
+# bootstrap for variance components confidence interval and the derived F-statistics
+boot.vc(levels = data.frame(rhod.genind@strata$pop, rhod.genind@strata$hab), rhod.hier[,-1],nboot=1000,quant=c(0.025,0.5,0.975))
+
+#signifcance of population
+test.between(rhod.hier[,-1], test.lev = rhod.genind@strata$pop, rand.unit = rhod.genind@strata$hab, nperm = 999)
+# $p.val
+#[1] 0.001001001
+# significance of habitat
+test.within(rhod.hier[,-1], test = rhod.genind@strata$hab, within = rhod.genind@strata$pop, nperm = 999)
+#$p.val
+#[1] 0.001001001
+
+# Same analysis for the small dataset with domicile and sylvatic samples.
+wc(rhod.domsyl)
+#$FST
+#[1] 0.2694247
+#$FIS
+#[1] -0.001796513
+
+rhod.domsyl.hier <- genind2hierfstat(rhod.domsyl, pop = rhod.domsyl@pop)
+rhod.domsyl.varcomp <- varcomp.glob(levels = data.frame(rhod.domsyl@strata$pop, rhod.domsyl@strata$hab), rhod.domsyl.hier[,-1], diploid = T)
+
+boot.vc(levels = data.frame(rhod.domsyl@strata$pop, rhod.domsyl@strata$hab), rhod.domsyl.hier[,-1], diploid = T,nboot=1000,quant=c(0.025,0.5,0.975))
+
+test.between(rhod.domsyl.hier[,-1], test.lev = rhod.domsyl@strata$pop, rand.unit = rhod.domsyl@strata$hab, nperm = 999)
+test.within(rhod.domsyl.hier[,-1], test = rhod.domsyl@strata$hab, within = rhod.domsyl@strata$pop, nperm = 999)
+
+
+
+```
+
+
+ Phylogenic relationship between samples from genetic distances
+
+
+```{r}
+
+rhod.domsyl.dist <- dist(rhod.domsyl) # euclidean distances from stats package
+rhod.domsyl.diss.dist<- diss.dist(rhod.domsyl, percent = FALSE, mat = FALSE) #  distance will be reflected as the number of alleles differing between to individuals from package poppr
+
+rhod.domsyl.dist.gene <- dist.gene(as.data.frame(rhod.domsyl), method = "pairwise", pairwise.deletion = F) # the distance d between two individuals is the number of loci for which they differ, and the associated variance is d(L - d)/L, where L is the number of loci from package ape
+
+rhod.domsyl.d.njtree <- nj(rhod.domsyl.dist)
+rhod.domsyl.dd.njtree <- nj(rhod.domsyl.diss.dist)
+rhod.domsyl.dg.njtree <- nj(rhod.domsyl.dist.gene)
+
+# Plot tree in R with plot.phylo and change tip or edge/branch colours based on a categories see : http://blog.phytools.org/2017/01/plotting-terminal-edges-of-tree.html
+
+labels <- cbind(indNames(rhod.domsyl), rhod.domsyl@strata$hab)
+dom.lab <- subset(labels, subset= labels[,2] == "1")
+syl.lab <- subset(labels, subset = labels[,2] == "2")
+dom.vec <- as.vector(dom.lab[,1])
+syl.vec <- as.vector(syl.lab[,1])
+tt<-paintBranches(rhod.domsyl.d.njtree,edge=sapply(dom.vec,match,rhod.domsyl.d.njtree$tip.label),
+    state="dom")
+tt<-paintBranches(tt, edge=sapply(syl.vec,match,rhod.domsyl.d.njtree$tip.label),
+    state="syl")
+cols<-setNames(c("blue","red"),c("dom","syl"))
+plot.phylo(tt, type="fan", tip.color=cols, edge.width=0.1, cex=0.6, no.margin=F, rotate=60, align.tip.label = TRUE)
+
+
+
+plot.phylo(midpoint(rhod.domsyl.d.njtree), type="fan", edge.width=0.1, cex=0.6, no.margin=F, rotate=60, align.tip.label = TRUE)
+plot.phylo(midpoint(rhod.domsyl.dd.njtree), type="fan", edge.width=0.1, cex=0.6, no.margin=F, rotate=60, align.tip.label = TRUE)
+plot.phylo(midpoint(rhod.domsyl.dg.njtree), type="fan", edge.width=0.1, cex=0.6, no.margin=F, rotate=60, align.tip.label = TRUE)
+
+# Save the different trees created from different genetic distances
+write.tree(rhod.domsyl.d.njtree, file="rhod.domsyl.d.tre", append = FALSE, digits = 10, tree.names = FALSE)
+
+write.tree(rhod.domsyl.dd.njtree, file="rhod.domsyl.dd.tre", append = FALSE, digits = 10, tree.names = FALSE)
+
+write.tree(rhod.domsyl.dg.njtree, file="rhod.domsyl.dg.tre", append = FALSE, digits = 10, tree.names = FALSE)
+
+
+```
+
+
+DAPC analysis
+
+
+```{r}
+
+# Dom vs syl
+
+# Remove communities without samples collected in both habitats (domicile and sylvatic).
+rhod.domsyl <- popsub(rhod.genind, blacklist=c("SF", "LM", "AH", "ND", "HG", "TC", "VC", "BM", "GA", "EX", "YS", "TR", "SS", "AZ", "NJ", "NT", "RT", "TM"))
+# Change the population map with the approrpiate domicile and sylvatic category.
+popmap.hab <- as.factor(as.vector(rhod.domsyl@strata$hab))
+rhod.domsyl@pop <- popmap.hab
+
+
+par(mfrow = c(1,2))
+rhod.domsyl.clust <- find.clusters(rhod.domsyl, max.n.clust = 14) # this is the good clustering
+100
+5
+
+rhod.domsyl.dapc <- dapc(rhod.domsyl, rhod.domsyl.clust$grp) # this is the good dapc
+50
+3
+
+rhod.domsyl.dapc$grp
+
+cols <- c("royalblue3", "chartreuse3")
+myPal <- colorRampPalette(c("blue","gold","red"))
+
+# domsyl
+
+scatter(rhod.domsyl.dapc, grp=rhod.domsyl@strata$hab, posi.da="bottomleft", col=cols, xax=1, yax=3, 
+        clab=0.8, solid=0.7, cex=3, pch=19, bg="white", cstar=0, cellipse=0, label = NULL, 
+        leg=F, txt.leg=paste("Cluster",1:5))
+# time
+par(new=TRUE)
+df.rhod.domsyl <- data.frame(x = rhod.domsyl.dapc$ind.coord[,1], y = rhod.domsyl.dapc$ind.coord[,3])
+noms.rhod.domsyl <- rhod.domsyl@strata$coltime
+s.label(dfxy = df.rhod.domsyl, xax=1, yax=2, label=noms.rhod.domsyl,
+        clabel=0.7, 
+        boxes=FALSE,
+        neig = TRUE,
+        grid=FALSE, addaxes=TRUE) # do not draw lines or axes in addition to the labels
+
+# Explore population
+par(new=TRUE)
+df.rhod.domsyl <- data.frame(x = rhod.domsyl.dapc$ind.coord[,1], y = rhod.domsyl.dapc$ind.coord[,3])
+noms.rhod.domsyl <- rhod.domsyl@strata$pop
+s.label(dfxy = df.rhod.domsyl, xax=1, yax=2, label=noms.rhod.domsyl,
+        clabel=0.8, 
+        boxes=FALSE,
+        neig = TRUE,
+        grid=FALSE, addaxes=TRUE)
+
+
+
+
+
+
+```
+
+
+Pairwise Fst comparisons among samples from domicile and sylvatic habitat within a communtiy
+
+
+```{r}
+
+#("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS")
+NBPERM <-999
+
+# BR dom syl pairwise Fst
+rhod.BR <- popsub(rhod.genind, blacklist=c( "AH", "AZ", "BM", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.br <- as.factor(as.vector(rhod.BR@strata$pophab))
+rhod.BR@pop <- popmap.br
+mat.obs.br <- pairwise.fst(rhod.BR, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.br <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.BR, pop=sample(pop(rhod.BR)), res.type="matrix"), mc.cores = 3)
+test.br <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.br[[i]][1,2])), mat.obs.br[1,2], alter="greater")
+
+# CE pairwise comparison
+rhod.CE <- popsub(rhod.genind, blacklist=c( "AH", "AZ", "BM", "BR", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.ce <- as.factor(as.vector(rhod.CE@strata$pophab))
+rhod.CE@pop <- popmap.ce
+mat.obs.ce <- pairwise.fst(rhod.CE, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.ce <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.CE, pop=sample(pop(rhod.CE)), res.type="matrix"), mc.cores = 4)
+test.ce <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.ce[[i]][1,2])), mat.obs.ce[1,2], alter="greater")
+
+
+# CG dom syl pairwise Fst
+rhod.CG <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.cg <- as.factor(as.vector(rhod.CG@strata$pophab))
+rhod.CG@pop <- popmap.cg
+mat.obs.cg <- pairwise.fst(rhod.CG, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.cg <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.CG, pop=sample(pop(rhod.CG)), res.type="matrix"), mc.cores = 4)
+test.cg <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cg[[i]][1,2])), mat.obs.cg[1,2], alter="greater")
+
+# CQ pairwise comparisons
+rhod.CQ <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.cq <- as.factor(as.vector(rhod.CQ@strata$pophab))
+rhod.CQ@pop <- popmap.cq
+mat.obs.cq <- pairwise.fst(rhod.CQ, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.cq <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.CQ, pop=sample(pop(rhod.CQ)), res.type="matrix"), mc.cores = 4)
+test.cq <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cq[[i]][1,2])), mat.obs.cq[1,2], alter="greater")
+
+# GL pairwise comparisons
+rhod.GL <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.gl <- as.factor(as.vector(rhod.GL@strata$pophab))
+rhod.GL@pop <- popmap.gl
+mat.obs.gl <- pairwise.fst(rhod.GL, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.gl <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.GL, pop=sample(pop(rhod.GL)), res.type="matrix"), mc.cores = 4)
+test.gl <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.gl[[i]][1,2])), mat.obs.gl[1,2], alter="greater")
+
+# HY pairwise comparisons
+rhod.HY <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.hy <- as.factor(as.vector(rhod.HY@strata$pophab))
+rhod.HY@pop <- popmap.hy
+mat.obs.hy <- pairwise.fst(rhod.HY, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.hy <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.HY, pop=sample(pop(rhod.HY)), res.type="matrix"), mc.cores = 4)
+test.hy <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.hy[[i]][1,2])), mat.obs.hy[1,2], alter="greater")
+
+# SJ pairwise comparisons
+rhod.SJ <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY","LM", "ND", "NJ", "NT", "RT", "SF",  "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.sj <- as.factor(as.vector(rhod.SJ@strata$pophab))
+rhod.SJ@pop <- popmap.sj
+mat.obs.sj <- pairwise.fst(rhod.SJ, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.sj <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.SJ, pop=sample(pop(rhod.SJ)), res.type="matrix"), mc.cores = 4)
+test.sj <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.sj[[i]][1,2])), mat.obs.sj[1,2], alter="greater")
+
+p <- c(0.001, 0.049, 0.182, 0.024, 0.222, 0.005, 0.055)
+p.adjust(p, "fdr")
+p.adjust(p, "bonferroni")
+
+NBPERM <- 999
+
+# Different year collection group samples
+#c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS")
+# Remove communities without samples collected in both habitats (domicile and sylvatic).
+rhod.BRT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.brt <- as.factor(as.vector(rhod.BRT@strata$pophabtimetreat))
+rhod.BRT@pop <- popmap.brt
+mat.obs.brt <- pairwise.fst(rhod.BRT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.brt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.BRT, pop=sample(pop(rhod.BRT)), res.type="matrix"), mc.cores = 4)
+test.brt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.brt[[i]][1,2])), mat.obs.brt[1,2], alter="greater")
+
+# CG
+rhod.CGT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.cgt <- as.factor(as.vector(rhod.CGT@strata$pophabtimetreat))
+rhod.CGT@pop <- popmap.cgt
+mat.obs.cgt <- pairwise.fst(rhod.CGT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.cgt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.CGT, pop=sample(pop(rhod.CGT)), res.type="matrix"), mc.cores = 4)
+test.cgt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cgt[[i]][1,2])), mat.obs.cgt[1,2], alter="greater")
+
+#GL
+rhod.GLT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.glt <- as.factor(as.vector(rhod.GLT@strata$pophabtimetreat))
+rhod.GLT@pop <- popmap.glt
+mat.obs.glt <- pairwise.fst(rhod.GLT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.glt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.GLT, pop=sample(pop(rhod.GLT)), res.type="matrix"), mc.cores = 4)
+test.glt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.glt[[i]][1,2])), mat.obs.glt[1,2], alter="greater")
+
+#SJ
+rhod.SJT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.sjt <- as.factor(as.vector(rhod.SJT@strata$pophabtimetreat))
+rhod.SJT@pop <- popmap.sjt
+mat.obs.sjt <- pairwise.fst(rhod.SJT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.sjt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.SJT, pop=sample(pop(rhod.SJT)), res.type="matrix"), mc.cores = 4)
+test.sjt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.sjt[[i]][1,2])), mat.obs.sjt[1,2], alter="greater")
+
+#ND
+rhod.NDT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM",  "NJ", "NT", "RT", "SF", "SJ","SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.ndt <- as.factor(as.vector(rhod.NDT@strata$pophabtimetreat))
+rhod.NDT@pop <- popmap.ndt
+mat.obs.ndt <- pairwise.fst(rhod.NDT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.ndt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.NDT, pop=sample(pop(rhod.NDT)), res.type="matrix"), mc.cores = 4)
+test.ndt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.ndt[[i]][1,2])), mat.obs.ndt[1,2], alter="greater")
+
+#TR
+rhod.TRT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GA", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ","SS", "TC", "TM", "VC", "YS"))
+popmap.trt <- as.factor(as.vector(rhod.TRT@strata$pophabtimetreat))
+rhod.TRT@pop <- popmap.trt
+mat.obs.trt <- pairwise.fst(rhod.TRT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.trt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.TRT, pop=sample(pop(rhod.TRT)), res.type="matrix"), mc.cores = 4)
+test.trt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.trt[[i]][1,2])), mat.obs.trt[1,2], alter="greater")
+
+#GA
+rhod.GAT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE", "CG", "CQ", "EX", "GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ","SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.gat <- as.factor(as.vector(rhod.GAT@strata$pophabtimetreat))
+rhod.GAT@pop <- popmap.gat
+mat.obs.gat <- pairwise.fst(rhod.GAT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.gat <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.GAT, pop=sample(pop(rhod.GAT)), res.type="matrix"), mc.cores = 4)
+test.gat <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.gat[[i]][1,2])), mat.obs.gat[1,2], alter="greater")
+
+# Special cases CE, CQ, HY
+
+# CE
+rhod.CET <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CG", "CQ", "EX", "GA","GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ","SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.cet <- as.factor(as.vector(rhod.CET@strata$pophabtimetreat))
+rhod.CET@pop <- popmap.cet
+mat.obs.cet <- pairwise.fst(rhod.CET, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.cet <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.CET, pop=sample(pop(rhod.CET)), res.type="matrix"), mc.cores = 4)
+test12.cet <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cet[[i]][1,2])), mat.obs.cet[1,2], alter="greater")
+test13.cet <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cet[[i]][1,3])), mat.obs.cet[1,3], alter="greater")
+test23.cet <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cet[[i]][2,3])), mat.obs.cet[2,3], alter="greater")
+
+# CQ
+rhod.CQT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE","CG", "EX", "GA","GL", "HG", "HY", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ","SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.cqt <- as.factor(as.vector(rhod.CQT@strata$pophabtimetreat))
+rhod.CQT@pop <- popmap.cqt
+mat.obs.cqt <- pairwise.fst(rhod.CQT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.cqt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.CQT, pop=sample(pop(rhod.CQT)), res.type="matrix"), mc.cores = 4)
+test12.cqt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cqt[[i]][1,2])), mat.obs.cqt[1,2], alter="greater")
+test13.cqt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cqt[[i]][1,3])), mat.obs.cqt[1,3], alter="greater")
+test23.cqt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.cqt[[i]][2,3])), mat.obs.cqt[2,3], alter="greater")
+
+
+# HY
+rhod.HYT <- popsub(rhod.genind, blacklist=c("AH", "AZ", "BM", "BR", "CE","CG", "CQ","EX", "GA","GL", "HG", "LM", "ND", "NJ", "NT", "RT", "SF", "SJ","SS", "TC", "TM", "TR", "VC", "YS"))
+popmap.hyt <- as.factor(as.vector(rhod.HYT@strata$pophabtimetreat))
+rhod.HYT@pop <- popmap.hyt
+mat.obs.hyt <- pairwise.fst(rhod.HYT, res.type="matrix") # this takes about 17 seconds on my computer
+mat.perm.hyt <- mclapply(1:NBPERM, function(i) pairwise.fst(rhod.HYT, pop=sample(pop(rhod.HYT)), res.type="matrix"), mc.cores = 4)
+test12.hyt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.hyt[[i]][1,2])), mat.obs.hyt[1,2], alter="greater")
+test13.hyt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.hyt[[i]][1,3])), mat.obs.hyt[1,3], alter="greater")
+test23.hyt <- as.randtest(na.omit(sapply(1:NBPERM, function(i) mat.perm.hyt[[i]][2,3])), mat.obs.hyt[2,3], alter="greater")
+
+p2 <- c(0.001, 0.084, 0.409, 0.022, 0.02, 0.004, 0.022, 0.475, 0.195, 0.06018, 0.017, 0.068, 0.05, 0.006, 0.685, 0.013)
+
+#p.adjust(p2, "bonferroni")
+# [1] 0.01600 1.00000 1.00000 0.35200 0.32000 0.06400 0.35200 1.00000 1.00000
+#[10] 0.96288 0.27200 1.00000 0.80000 0.09600 1.00000 0.20800
+
+#[1] 0.01600000 0.11200000 0.46742857 0.04400000 0.04400000 0.03200000
+# [7] 0.04400000 0.50666667 0.24000000 0.09628800 0.04400000 0.09890909
+#[13] 0.08888889 0.03200000 0.68500000 0.04400000
+
+```
+
+Isolation by distance analyses separetely for domicile and sylvatic populations
+
+
+```{r}
+
+# subsample domicile and sylvatic populations
+
+popmap.pophab <- as.factor(as.vector(rhod.genind@strata$pophab))
+rhod.pophab<- rhod.genind
+rhod.pophab@pop <- popmap.pophab
+
+#c("AHdom", "AZsyl", "BMdom", "BRdom", "BRsyl", "CEdom", "CEsyl", "CGdom", "CGsyl", "CQdom", "CQsyl", "EXdom", "GAdom", "GLdom", "GLsyl", "HGdom", "HYdom", "HYsyl", "LMdom", "NDdom", "NJdom", "NTsyl", "RTsyl", "SFdom", "SJdom", "SJsyl", "SSdom", "TCdom", "TMdom", "TRdom", "VCdom", "YSdom")
+
+rhod.dom <- popsub(rhod.pophab, blacklist=c("AZsyl",  "BRsyl",  "CEsyl", "CGsyl",  "CQsyl",  "GLsyl",  "HYsyl", "NTsyl", "RTsyl", "SJsyl"))
+
+rhod.syl <- popsub(rhod.pophab, blacklist=c("AHdom", "BMdom", "BRdom", "CEdom",  "CGdom",  "CQdom",  "EXdom", "GAdom", "GLdom",  "HGdom", "HYdom",  "LMdom", "NDdom", "NJdom", "SFdom", "SJdom",  "SSdom", "TCdom", "TMdom", "TRdom", "VCdom", "YSdom"))
+
+# Calculate all pairwise Fst and Hendricks Gst matrices.
+rhod.dom.pwFst <- pairwise.fst(rhod.dom)
+rhod.syl.pwFst <- pairwise.fst(rhod.syl)
+rhod.dom.pwGst <- pairwise_Gst_Hedrick(rhod.dom)
+rhod.syl.pwGst <- pairwise_Gst_Hedrick(rhod.syl)
+
+write.csv(as.matrix(rhod.dom.pwFst), file = "rhod.dom.pwFst.csv", row.names = T, col.names = T)
+write.csv(as.matrix(rhod.syl.pwFst), file = "rhod.syl.pwFst.csv")
+write.csv(as.matrix(rhod.dom.pwGst), file = "rhod.dom.pwGst.csv")
+write.csv(as.matrix(rhod.syl.pwGst), file = "rhod.syl.pwGst.csv")
+
+
+
+# domicile mantel test with Fst matrix
+# Pairwise Fst matrix
+genmat.dom <- read.csv("rhod.dom.pwFst.csv", header = TRUE, row.names = 1)
+Dgen.matrix.dom <- as.matrix(genmat.dom)
+Dgen.dom <- as.dist(Dgen.matrix.dom)
+
+#Create a matrix of site locations
+sites.dom <- read.csv ("UTMdom.csv")
+sites.mat.dom <-as.matrix(sites.dom[c("X", "Y")])
+sites.mat.dom
+#Get geographic distance in meters
+geo.dist.dom <-pointDistance(sites.mat.dom,longlat=F)
+Dgeo.dom <-as.dist(geo.dist.dom)
+
+# Mantel test
+ibd.dom <- mantel.randtest(Dgen.dom,Dgeo.dom)
+#Monte-Carlo test
+#Call: mantel.randtest(m1 = Dgen.dom, m2 = Dgeo.dom)
+#Observation: 0.4589036 
+#Based on 999 replicates
+#Simulated p-value: 0.001 
+#Alternative hypothesis: greater 
+#    Std.Obs Expectation    Variance 
+#3.693814571 0.001124974 0.015358924
+
+plot(ibd.dom)
+plot(Dgeo.dom, Dgen.dom)
+abline(glm(Dgen.dom~Dgeo.dom), col="red",lty=2)
+
+
+dens.dom <- kde2d(Dgeo.dom,Dgen.dom, n=300)
+myPal <- colorRampPalette(c("white","blue","gold", "orange", "red"))
+plot(Dgeo.dom, Dgen.dom, pch=20,cex=.5)
+image(dens, col=transp(myPal(300),.7), add=TRUE)
+abline(glm(Dgen.dom~Dgeo.dom), col="red",lty=2)
+title("Isolation by distance plot")
+
+# correlograms 
+plot(mgram(Dgen.dom, Dgeo.dom))
+
+#$mgram
+#           lag ngroup      mantelr  pval         llim          ulim
+# [1,]  5358.31     28  0.263278117 0.001  0.203484052  3.583189e-01
+# [2,] 16074.93     31  0.251757431 0.007  0.205856603  2.937232e-01
+# [3,] 26791.55     48  0.069324515 0.450 -0.001433944  1.409242e-01
+# [4,] 37508.17     47 -0.212058853 0.008 -0.318197129 -1.040625e-01
+# [5,] 48224.79     39 -0.141297611 0.119 -0.221478670 -4.831148e-02
+# [6,] 58941.41     19  0.040210324 0.651 -0.041796127  1.362543e-01
+# [7,] 69658.04      4 -0.007217147 0.924 -0.034531010  1.507395e-02
+# [8,] 80374.66      7 -0.123823665 0.252 -0.170111033  2.825633e-17
+# [9,] 91091.28      7 -0.270417898 0.019 -0.316064780  4.296916e-17
+
+# Sylvatic mantel test with Fst matrix
+# Pairwise Fst matrix
+genmat.syl <- read.csv("rhod.syl.pwFst.csv", header = TRUE, row.names = 1)
+Dgen.matrix.syl <- as.matrix(genmat.syl)
+Dgen.syl <- as.dist(Dgen.matrix.syl)
+
+#Create a matrix of site locations
+sites.syl <- read.csv ("UTMsyl.csv")
+sites.mat.syl <-as.matrix(sites.syl[c("X", "Y")])
+sites.mat.syl
+#Get geographic distance in meters
+geo.dist.syl <-pointDistance(sites.mat.syl,longlat=F)
+Dgeo.syl <-as.dist(geo.dist.syl)
+
+# Mantel test
+ibd.syl <- mantel.randtest(Dgen.syl,Dgeo.syl)
+#Monte-Carlo test
+#Call: mantel.randtest(m1 = Dgen.syl, m2 = Dgeo.syl)
+#Observation: 0.3116344 
+#Based on 999 replicates
+#Simulated p-value: 0.043 
+#Alternative hypothesis: greater 
+#    Std.Obs Expectation    Variance 
+#1.838319733 0.000484225 0.028648241 
+
+plot(ibd.syl)
+plot(Dgeo.syl, Dgen.syl)
+abline(glm(Dgen.syl~Dgeo.syl), col="red",lty=2)
+
+dens.syl <- kde2d(Dgeo.syl,Dgen.syl, n=300)
+myPal <- colorRampPalette(c("white","blue","gold", "orange", "red"))
+plot(Dgeo.syl, Dgen.syl, pch=20,cex=.5)
+image(dens.syl, col=transp(myPal(300),.7), add=TRUE)
+abline(glm(Dgen.syl~Dgeo.syl), col="red",lty=2)
+title("Isolation by distance plot")
+
+# correlograms 
+plot(mgram(Dgen.syl, Dgeo.syl))
+
+#$mgram
+ #         lag ngroup      mantelr  pval        llim          ulim
+#[1,]  7259.67      6  0.314929838 0.031  0.10654025  5.159934e-01
+#[2,] 21779.01      9  0.256346077 0.089  0.14020955  3.940264e-01
+#[3,] 36298.35     14 -0.291876131 0.060 -0.47245259 -1.015560e-01
+#[4,] 50817.69     11 -0.074106309 0.629 -0.33225450  1.271204e-01
+#[5,] 65337.03      1  0.003057791 1.000 -0.03117159  2.767909e-02
+#[6,] 79856.37      3 -0.116074236 0.443 -0.26504078  2.460935e-17
+
+```
+
+Prepare dataframe for regression models 
+
+```{r}
+
+plot(Dgeo.dom, Dgen.dom, col="royalblue3", cex=1, pch=19)
+points(Dgeo.syl, Dgen.syl, col="chartreuse3", cex=1, pch=19)
+abline(lm(Dgen.dom~Dgeo.dom), col="royalblue3", lty=2)
+abline(lm(Dgen.syl~Dgeo.syl), col="chartreuse3", lty=2)
+
+# Create a tibble data frames of the pairwise genetic and geographic distances between communties.
+df.Dgen.dom <- as_tibble(df.Dgen.dom <- melt(as.matrix(Dgen.dom), varnames = c("row", "col")))
+df.Dgeo.dom <- as_tibble(df.Dgeo.dom <- melt(as.matrix(Dgeo.dom), varnames = c("row", "col")))
+# Add the value of pairwise geographic distances to the pairwise geentic distances dataframe
+df.Dgengeo <- df.Dgen.dom %>% right_join(df.Dgeo.dom, by=c("row","col"))
+# Add a new column with a cotegorical variable called Habitat
+df.Dgengeo <- mutate(df.Dgengeo, habitat = "Domicile")
+
+df.Dgen.syl <- as_tibble(df.Dgen.syl <- melt(as.matrix(Dgen.syl), varnames = c("row", "col")))
+df.Dgeo.syl <- as_tibble(df.Dgeo.syl <- melt(as.matrix(Dgeo.syl), varnames = c("row", "col")))
+df.Dgengeo.syl <- df.Dgen.syl %>% right_join(df.Dgeo.syl, by=c("row","col"))
+df.Dgengeo.syl <- mutate(df.Dgengeo.syl, habitat = "Sylvatic") 
+
+# Stack domicile and sylvatic data frames on top of each other.
+df.Dgengeo.domsyl <- as_tibble(Stack(df.Dgengeo, df.Dgengeo.syl))
+# Remove zero values for appropriate regression
+new.df.Dgengeo.domsyl <- df.Dgengeo.domsyl %>% filter(value.x>0, value.y>0) # remove zero values
+
+new.df.Dgengeo.domsyl <- new.df.Dgengeo.domsyl %>% rename(pop1 = row, pop2 = col, gen_dist = value.x, geo_dist = value.y)
+
+write_csv(new.df.Dgengeo.domsyl, "pair.gen.geo.dist.csv")
+
+```
+
+
+Linear regression model - ancova
+
+
+```{r}
+
+mycol <- c("royalblue3","chartreuse3")
+
+wcFst <-ggplot(new.df.Dgengeo.domsyl, aes(value.y, value.x, shape=habitat, colour= habitat, fill=habitat))+
+  geom_point(size=4, alpha=0.7) +
+  geom_smooth(method="lm", alpha=0.5, size=2) + 
+  scale_color_manual(values =mycol)+
+  scale_fill_manual(values = mycol) +
+  theme_bw() + 
+  xlab("Geographic distance (m)") +
+  ylab(bquote('Genetic distance ('*F[ST]*')'))
+
+rousset.Fst <-ggplot(new.df.Dgengeo.domsyl, aes(value.y, (value.x/(1-value.x)), shape=habitat, colour= habitat, fill=habitat))+
+  geom_point(size=4, alpha=0.7) +
+  geom_smooth(method="lm", alpha=0.5, size=2) + 
+  scale_color_manual(values =mycol)+
+  scale_fill_manual(values = mycol) +
+  theme_bw() + 
+  xlab("Geographic distance (m)") +
+  ylab(bquote('Genetic distance ('*F[ST]/(1-F[ST])*')'))
+
+domsyl.m1 <- lm(formula=value.x~value.y*habitat, data = new.df.Dgengeo.domsyl)
+domsyl.m2 <- lm(formula=value.x~value.y+habitat, data = new.df.Dgengeo.domsyl)
+domsyl.m3 <- lm(formula=value.x~value.y, data = new.df.Dgengeo.domsyl)
+
+summary(domsyl.m1)
+summary(domsyl.m2)
+summary(domsyl.m3)
+
+anova(domsyl.m2)
+#Analysis of Variance Table
+
+#Model 1: value.x ~ value.y + habitat
+#Model 2: value.x ~ value.y * habitat
+#  Res.Df    RSS Df Sum of Sq      F Pr(>F)
+#1    549 2.5074                           
+#2    548 2.4999  1 0.0075419 1.6533 0.1991
+
+domsyl.r.m1 <- lm(formula=(value.x/(1-value.x))~value.y*habitat, data = new.df.Dgengeo.domsyl)
+domsyl.r.m2 <- lm(formula=(value.x/(1-value.x))~value.y+habitat, data = new.df.Dgengeo.domsyl)
+summary(domsyl.r.m1)
+summary(domsyl.r.m2)
+anova(domsyl.r.m2, domsyl.r.m1 )
+
+#Analysis of Variance Table
+
+#Model 1: (value.x/(1 - value.x)) ~ value.y + habitat
+#Model 2: (value.x/(1 - value.x)) ~ value.y * habitat
+#    Res.Df    RSS Df Sum of Sq      F Pr(>F)
+#1    549 6.3538                           
+#2    548 6.3275  1  0.026342 2.2813 0.1315
+
+```
+
+Linear mixed-effects model 
+
+
+```{r}
+
+gengeo_data <- read_csv("./pair.gen.geo.dist.csv", col_names = T)
+
+gengeo_data$pop1.hab <- paste(gengeo_data$habitat, gengeo_data$pop1, sep = "-")
+gengeo_data$pop2.hab <- paste(gengeo_data$habitat, gengeo_data$pop2, sep = "-")
+gengeo_data$geo_dist_km <- as.double(round(gengeo_data$geo_dist/1000, digits =1))
+
+lmemod1 <- lme(gen_dist ~ geo_dist, random = ~geo_dist|habitat, correlation=corMLPE(form=~pop1+pop2|habitat), data=gengeo_data)
+
+lmemod2 <- gls(gen_dist ~ geo_dist_km, correlation=corMLPE(form=~pop1.hab+pop2.hab), data=gengeo_data)
+
+lmemod3 <- gls(gen_dist ~ geo_dist_km + habitat, correlation=corMLPE(form=~pop1.hab+pop2.hab), data=gengeo_data)
+#summary(lmemod3)
+#Generalized least squares fit by REML
+#  Model: gen_dist ~ geo_dist_km + habitat 
+#  Data: gengeo_data 
+ #       AIC       BIC   logLik
+#  -1851.935 -1830.394 930.9674
+
+#Correlation Structure: corMLPE
+# Formula: ~pop1.hab + pop2.hab 
+# Parameter estimate(s):
+#      rho 
+#0.3456614 
+
+#Coefficients:
+#                     Value  Std.Error   t-value p-value
+#(Intercept)      0.1084149 0.01834888  5.908532  0.0000
+#geo_dist_km      0.0019010 0.00011285 16.845851  0.0000
+#habitatSylvatic -0.0042290 0.03218032 -0.131416  0.8955
+
+# Correlation: 
+#                (Intr) g_dst_
+#geo_dist_km     -0.219       
+#habitatSylvatic -0.542 -0.005
+
+#Standardized residuals:
+ #      Min         Q1        Med         Q3        Max 
+#-2.1432625 -0.6319959 -0.2008772  0.6184771  2.2171929 
+
+#Residual standard error: 0.07103711 
+#Degrees of freedom: 552 total; 549 residual
+rsquared(lmemod3)
+# 0.2564392
+
+anova(lmemod3)
+#Denom. DF: 549 
+#            numDF   F-value p-value
+#(Intercept)     1 139.49374  <.0001
+#geo_dist_km     1 283.76738  <.0001
+#habitat         1   0.01727  0.8955
+
+lmemod4 <- gls(gen_dist ~ geo_dist_km * habitat, correlation=corMLPE(form=~pop1.hab+pop2.hab), data=gengeo_data)
+
+
+write.csv(gengeo_data, file = "gengeo_data.csv")
+
+mycol <- c("royalblue3","chartreuse3")
+
+gengeo_data$predgls <- predict(lmemod3)
+intervals(lmemod3)
+
+ggplot(gengeo_data, aes(geo_dist_km, gen_dist, shape=habitat, colour= habitat, fill=habitat))+
+  geom_point(size=4, alpha=0.7) +
+  geom_line(aes(y=predgls), size = 1) +
+  scale_color_manual(values =mycol)+
+  scale_fill_manual(values = mycol) +
+  theme_bw() + 
+  xlab("Geographic distance (Km)") +
+  ylab(bquote('Genetic distance ('*F[ST]*')')) +
+  font("xlab", size = 14, face = "bold") +
+  font("ylab", size = 18, face = "bold") 
+
+
+
+#Linear mixed-effects model fit by REML
+#  Data: new.df.Dgengeo.domsyl 
+#  Log-restricted-likelihood: 939.4893
+#  Fixed: gen_dist ~ geo_dist 
+# (Intercept)     geo_dist 
+# 8.214615e-02 2.549583e-06 
+
+# Random effects:
+# Formula: ~geo_dist | habitat
+# Structure: General positive-definite, Log-Cholesky parametrization
+#            StdDev       Corr  
+#(Intercept) 4.955125e-02 (Intr)
+#geo_dist    1.266782e-06 -0.998
+#Residual    7.559832e-02       
+
+# Correlation Structure: corMLPE
+# Formula: ~pop1 + pop2 | habitat 
+# Parameter estimate(s):
+#      rho 
+#0.3729286 
+#Number of Observations: 552
+#Number of Groups: 2 
+
+```
+
+Domicile mantel test with Hendrick Gst matrix
+```{r}
+
+genmat.dom <- read.csv("./rhod.dom.pwGst.csv", header = TRUE, row.names = 1)
+Dgen.matrix.dom <- as.matrix(genmat.dom)
+Dgen.dom <- as.dist(Dgen.matrix.dom)
+
+#Create a matrix of site locations
+sites.dom <- read.csv ("UTMdom.csv")
+sites.mat.dom <-as.matrix(sites.dom[c("X", "Y")])
+sites.mat.dom
+#Get geographic distance in meters
+geo.dist.dom <-pointDistance(sites.mat.dom,longlat=F)
+Dgeo.dom <-as.dist(geo.dist.dom)
+
+# Mantel test
+ibd.dom <- mantel.randtest(Dgen.dom,Dgeo.dom)
+
+#Monte-Carlo test
+#Call: mantel.randtest(m1 = Dgen.dom, m2 = Dgeo.dom)
+
+#Observation: 0.4717461 
+
+#Based on 999 replicates
+#Simulated p-value: 0.001 
+#Alternative hypothesis: greater 
+
+#     Std.Obs  Expectation     Variance 
+# 3.819369744 -0.005170374  0.015591979
+
+plot(ibd.dom)
+plot(Dgeo.dom, Dgen.dom)
+abline(glm(Dgen.dom~Dgeo.dom), col="red",lty=2)
+
+dens.dom <- kde2d(Dgeo.dom,Dgen.dom, n=300)
+myPal <- colorRampPalette(c("white","blue","gold", "orange", "red"))
+plot(Dgeo.dom, Dgen.dom, pch=20,cex=.5)
+image(dens.dom, col=transp(myPal(300),.7), add=TRUE)
+abline(glm(Dgen.dom~Dgeo.dom), col="red",lty=2)
+
+
+# correlograms 
+plot(mgram(Dgen.dom, Dgeo.dom))
+
+#$mgram
+#           lag ngroup     mantelr  pval        llim          ulim
+# [1,]  5358.31     28  0.27667103 0.001  0.21724984  3.901866e-01
+# [2,] 16074.93     31  0.24023134 0.005  0.18713014  2.939219e-01
+# [3,] 26791.55     48  0.12419721 0.182  0.03124524  2.220211e-01
+# [4,] 37508.17     47 -0.23232491 0.002 -0.33317557 -1.120278e-01
+# [5,] 48224.79     39 -0.19201352 0.022 -0.26257176 -1.083473e-01
+# [6,] 58941.41     19  0.04566118 0.585 -0.03674024  1.259654e-01
+# [7,] 69658.04      4 -0.01115473 0.887 -0.03884384  1.110006e-02
+# [8,] 80374.66      7 -0.11905397 0.273 -0.15630914  3.032338e-17
+# [9,] 91091.28      7 -0.25549826 0.021 -0.30267904  5.719991e-18
+
+
+
+
+# Sylvatic mantel test with Hendricks Gst matrix.
+
+# Pairwise Fst matrix
+genmat.syl <- read.csv("rhod.syl.pwGst.csv", header = TRUE, row.names = 1)
+Dgen.matrix.syl <- as.matrix(genmat.syl)
+Dgen.syl <- as.dist(Dgen.matrix.syl)
+
+#Create a matrix of site locations
+sites.syl <- read.csv ("UTMsyl.csv")
+sites.mat.syl <-as.matrix(sites.syl[c("X", "Y")])
+sites.mat.syl
+#Get geographic distance in meters
+geo.dist.syl <-pointDistance(sites.mat.syl,longlat=F)
+Dgeo.syl <-as.dist(geo.dist.syl)
+
+# Mantel test
+ibd.syl <- mantel.randtest(Dgen.syl,Dgeo.syl)
+
+plot(ibd.syl)
+plot(Dgeo.syl, Dgen.syl)
+abline(glm(Dgen.syl~Dgeo.syl), col="red",lty=2)
+
+dens.syl <- kde2d(Dgeo.syl,Dgen.syl, n=300)
+myPal <- colorRampPalette(c("white","blue","gold", "orange", "red"))
+plot(Dgeo.syl, Dgen.syl, pch=20,cex=.5)
+image(dens.syl, col=transp(myPal(300),.7), add=TRUE)
+abline(glm(Dgen.syl~Dgeo.syl), col="red",lty=2)
+title("Isolation by distance plot")
+
+# correlograms 
+plot(mgram(Dgen.syl, Dgeo.syl))
+
+#$mgram
+#          lag ngroup     mantelr  pval        llim          ulim
+#[1,]  7259.67      6  0.37529144 0.009  0.10821254  5.702839e-01
+#[2,] 21779.01      9  0.16849124 0.338  0.02946252  3.252022e-01
+#[3,] 36298.35     14 -0.24897970 0.099 -0.43987982 -4.853562e-02
+#[4,] 50817.69     11 -0.10678453 0.485 -0.34985600  1.068986e-01
+#[5,] 65337.03      1 -0.03667396 0.965 -0.07074864  8.330271e-17
+#[6,] 79856.37      3 -0.07906545 0.657 -0.24578835  1.194972e-02
+
+
+```
+
+DAPC with RF SNPS
+
+```{r}
+
+rhod.rf.vcf <- read.vcfR("./snps.loja.KNNimpR3.rf.recode.vcf")
+
+# Convert vcf to genind object
+rhod.rf.genind <- vcfR2genind(rhod.rf.vcf, sep = "/")
+
+# Add population map from sample information file.
+rhod.info <- read.csv("./C02KNNimpR3_strata.csv")
+popmap <- as.factor(as.vector(rhod.info$pop))
+rhod.rf.genind@pop <- popmap
+rhod.rf.genind
+
+strata(rhod.rf.genind) <- rhod.info
+rhod.rf.genind
+
+# Remove communities without samples collected in both habitats (domicile and sylvatic).
+rhod.rf.domsyl <- popsub(rhod.rf.genind, blacklist=c("SF", "LM", "AH", "ND", "HG", "TC", "VC", "BM", "GA", "EX", "YS", "TR", "SS", "AZ", "NJ", "NT", "RT", "TM"))
+# Change the population map with the approrpiate domicile and sylvatic category.
+popmap.hab <- as.factor(as.vector(rhod.domsyl@strata$hab))
+rhod.domsyl@pop <- popmap.hab
+
+
+
+par(mfrow = c(1,2))
+rhod.rf.domsyl.clust <- find.clusters(rhod.rf.domsyl, max.n.clust = 2) # this is the good clustering
+40
+2
+
+rhod.domsyl.dapc <- dapc(rhod.rf.domsyl, rhod.rf.domsyl.clust$grp) # this is the good dapc
+35
+2
+
+rhod.rf.domsyl.dapc$grp
+
+cols <- c("royalblue3", "chartreuse3")
+myPal <- colorRampPalette(c("blue","gold","red"))
+
+# domsyl
+
+scatter(rhod.rf.domsyl.dapc, grp=rhod.rf.domsyl@strata$hab, posi.da="bottomleft", col=cols, xax=1, yax=2, 
+        clab=0.8, solid=0.7, cex=3, pch=19, bg="white", cstar=0, cellipse=0, label = NULL, 
+        leg=F, txt.leg=paste("Cluster",1:5))
+# time
+par(new=TRUE)
+df.rhod.domsyl <- data.frame(x = rhod.domsyl.dapc$ind.coord[,1], y = rhod.domsyl.dapc$ind.coord[,3])
+noms.rhod.domsyl <- rhod.domsyl@strata$coltime
+s.label(dfxy = df.rhod.domsyl, xax=1, yax=2, label=noms.rhod.domsyl,
+        clabel=0.7, 
+        boxes=FALSE,
+        neig = TRUE,
+        grid=FALSE, addaxes=TRUE) # do not draw lines or axes in addition to the labels
+
+# Explore population
+par(new=TRUE)
+df.rhod.domsyl <- data.frame(x = rhod.domsyl.dapc$ind.coord[,1], y = rhod.domsyl.dapc$ind.coord[,3])
+noms.rhod.domsyl <- rhod.domsyl@strata$pop
+s.label(dfxy = df.rhod.domsyl, xax=1, yax=2, label=noms.rhod.domsyl,
+        clabel=0.8, 
+        boxes=FALSE,
+        neig = TRUE,
+        grid=FALSE, addaxes=TRUE)
+
+
+
+
+
+
+
+```
