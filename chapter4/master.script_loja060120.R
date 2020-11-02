@@ -14,10 +14,6 @@ ra1<- raster("./dem.loja_new.tif")
 ra2 <- raster("./land.loja_new.tif")
 ra3<- raster("./roads.loja_new.tif")
 
-# Test Git commit
-ra4<- raster("./dem.loja_new.tif")
-ra5 <- raster("./land.loja_new.tif")
-ra6<- raster("./roads.loja_new.tif")
 
 # Stacks rasters
 cat.stack <- stack(ra1, ra2, ra3)

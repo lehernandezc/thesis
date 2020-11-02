@@ -20,7 +20,6 @@ library(tidyverse)
 
  Analysis with Outflank
 ```{r}
-# Test Git chnages pull/push
 # ead in the SNP data, SPN IDs and the samples population map.
 geno <- read_delim("./KNNimpR3.domsylV2.genomat.012", delim = "\t", col_names = F)
 gen <- geno[,2:2553]
