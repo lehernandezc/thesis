@@ -20,6 +20,8 @@ library(tidyverse)
 
 ## Random forest without population structure correction: (does not work as well)
 ```{r}
+
+# Test for branch usage of github
 geno <- read_delim("C:/Users/quiqu/Dropbox/Recuadoriensis_Analysis/RF_analysis/RFV2_analysis/KNNimpR3.domsylV2.genomat.012", delim = "\t", col_names = F)
 phen <- read_csv("C:/Users/quiqu/Dropbox/Recuadoriensis_Analysis/RF_analysis/RFV2_analysis/domsyl.ipca.csv")
 
